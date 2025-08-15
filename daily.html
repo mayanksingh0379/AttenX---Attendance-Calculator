@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Attendance — Daily</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="favicon.png">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">✦ AttenX</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="classes.html">Classes</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="section-head">
+        <h2>Daily Attendance Calendar</h2>
+        <div class="controls">
+          <button class="btn" id="prevMonth">⬅</button>
+          <div id="monthYear" class="month-year">Loading...</div>
+          <button class="btn" id="nextMonth">➡</button>
+        </div>
+      </div>
+
+      <div class="calendar-wrapper">
+        <div class="weekday-row">
+          <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+        </div>
+        <div id="calendar" class="calendar"></div>
+      </div>
+
+      <div class="card note muted">Tap a day to toggle: Present → Absent → None</div>
+      <div class="card actions-row">
+        <button class="btn outline" id="clearDailyBtn">Clear Daily Records</button>
+        <button class="btn" id="markTodayPresent">Mark Today Present</button>
+        <button class="btn" id="markTodayAbsent">Mark Today Absent</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      initDailyPage();
+    });
+  </script>
+</body>
+</html>

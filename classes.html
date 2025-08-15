@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Attendance — Classes</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="favicon.png">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">✦ AttenX</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="daily.html">Daily</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="section-head">
+        <h2>Class-wise Attendance</h2>
+        <div class="controls">
+          <input id="newSubInput" placeholder="Add subject (e.g. CP)" />
+          <button class="btn" id="addSubBtn">Add</button>
+        </div>
+      </div>
+
+      <div id="subjectsList" class="subjects-grid"></div>
+
+      <div class="card actions-row">
+        <button class="btn outline" id="clearClassesBtn">Clear Class Records</button>
+        <button class="btn" id="exportBtn">Export JSON</button>
+        <input id="importFile" type="file" accept="application/json" />
+      </div>
+    </section>
+  </main>
+
+  <template id="subjectCardTpl">
+    <div class="subject-card">
+      <div class="sub-header">
+        <div class="sub-title">__NAME__</div>
+        <div class="sub-percent">0%</div>
+      </div>
+      <div class="sub-body">
+        <div class="counters">
+          <div><small>Present</small><div class="present-count">0</div></div>
+          <div><small>Total</small><div class="total-count">0</div></div>
+        </div>
+
+        <div class="sub-actions">
+          <button class="btn small inc-present">+ Present</button>
+          <button class="btn small inc-absent">+ Absent</button>
+          <button class="btn small warn reset-sub">Reset</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      initClassesPage();
+    });
+  </script>
+</body>
+</html>
