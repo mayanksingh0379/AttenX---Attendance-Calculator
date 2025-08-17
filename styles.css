@@ -60,3 +60,41 @@ body{
   .big-metric{font-size:44px}
   .subjects-grid{grid-template-columns:1fr}
 }
+
+/* ===== Today’s Attendance Row Styling ===== */
+.today-record {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.today-record strong {
+  font-weight: 600;
+}
+
+.today-record.present strong {
+  color: var(--success); /* green if present */
+}
+
+.today-record.absent strong {
+  color: var(--danger); /* red if absent */
+}
+
+.today-record .btn {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  margin-left: 12px;
+}
+
+.today-record .muted {
+  font-style: italic;
+  font-size: 13px;
+  color: var(--muted);
+}
+

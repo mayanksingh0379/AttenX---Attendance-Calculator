@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="apple-touch-icon" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+
 </head>
 <body>
   <header class="topbar">
@@ -19,7 +21,7 @@
 
   <main class="container">
     <section class="card hero">
-      <div class="greeting">Hello, <span class="name">Mayank</span> 👋</div>
+      <div class="greeting">Hello, <span class="name">Student</span> 👋</div>
       <div class="date" id="todayDate">--</div>
 
       <div class="big-metric" id="overallPercent">--%</div>
@@ -35,7 +37,7 @@
       <!-- small breakdowns -->
     </section>
 
-    <footer class="card small muted">App stored locally on your device — no internet required.</footer>
+    <footer class="card small muted">Made by Mayank Singh, Student of Sandip University :)</footer>
   </main>
 
   <script src="app.js"></script>
@@ -47,6 +49,10 @@
       document.getElementById('todayDate').textContent = today.toLocaleDateString(undefined, opts);
       renderHomeOverview();
     });
+    if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/service-worker.js");
+      }
+
   </script>
 </body>
 </html>
