@@ -30,6 +30,64 @@ function formatDate(iso) {
   return d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
 }
 
+/* ========== Local Notification Helpers ========== */
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) {
+    console.log('This browser does not support notifications');
+    return false;
+  }
+  
+  try {
+    const permission = await Notification.requestPermission();
+    return permission === 'granted';
+  } catch (error) {
+    console.error('Error requesting notification permission:', error);
+    return false;
+  }
+}
+
+function scheduleLocalNotification() {
+  // Check if notifications are already scheduled
+  if (localStorage.getItem('notificationsEnabled')) {
+    return;
+  }
+
+  // Set notification time to 5:00 PM daily
+  const now = new Date();
+  const scheduledTime = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    17, // 5:00 pm 
+    0,
+    0
+  );
+  
+  // If it's past 5 PM, schedule for next day
+  if (now > scheduledTime) {
+    scheduledTime.setDate(scheduledTime.getDate() + 1);
+  }
+
+  const timeUntilNotification = scheduledTime.getTime() - now.getTime();
+
+  // Schedule daily notification
+  const scheduleNext = () => {
+    if (Notification.permission === 'granted') {
+      new Notification('AttenX Reminder', {
+        body: 'Don\'t forget to mark your attendance for today!',
+        icon: 'favicon.png'
+      });
+      
+      // Schedule next notification in 24 hours
+      setTimeout(scheduleNext, 24 * 60 * 60 * 1000);
+    }
+  };
+
+  // Schedule first notification
+  setTimeout(scheduleNext, timeUntilNotification);
+  localStorage.setItem('notificationsEnabled', 'true');
+}
+
 /* ========== HOME PAGE ========== */
 function computeOverallPercent() {
   const classes = readClasses();
@@ -215,7 +273,75 @@ function initClassesPage(){
     importFile.value='';
   });
 
+  if(document.getElementById('exportPdfBtn')) {
+    document.getElementById('exportPdfBtn').addEventListener('click', () => {
+      try {
+        generateAttendanceReport();
+      } catch (err) {
+        console.error('PDF generation failed:', err);
+        alert('Failed to generate PDF. Please try again.');
+      }
+    });
+  }
+
   renderClasses();
+}
+
+function calculateStats(records) {
+  const present = records.filter(r => r.status === 'present').length;
+  const total = records.length;
+  const pct = total ? Math.round((present/total)*100) : 0;
+  return { present, total, pct };
+}
+
+function generateAttendanceReport() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const classes = readClasses();
+  
+  // Set title
+  doc.setFontSize(20);
+  doc.text("Attendance Report", 20, 20);
+  
+  // Add date
+  doc.setFontSize(12);
+  doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 20, 30);
+  
+  let yPos = 50;
+  
+  // For each subject
+  Object.entries(classes).forEach(([name, data]) => {
+    if (yPos > 250) {
+      doc.addPage();
+      yPos = 20;
+    }
+    
+    const records = Array.isArray(data.records) ? data.records : [];
+    const { present, total, pct } = calculateStats(records);
+    
+    doc.setFontSize(14);
+    doc.text(`${name}`, 20, yPos);
+    doc.setFontSize(12);
+    doc.text(`Attendance: ${present}/${total} (${pct}%)`, 20, yPos + 7);
+    
+    yPos += 20;
+    
+    // Add recent attendance records
+    if (records.length > 0) {
+      doc.setFontSize(10);
+      records.slice(-5).forEach((record, i) => {
+        doc.text(
+          `${formatDate(record.date)}: ${record.status}`,
+          30,
+          yPos + (i * 6)
+        );
+      });
+      yPos += 35;
+    }
+  });
+  
+  // Save PDF
+  doc.save('attendance-report.pdf');
 }
 
 /* ========== DAILY PAGE (unchanged) ========== */
@@ -298,8 +424,36 @@ function initDailyPage(){
 }
 
 /* ========== Bootstrapping ========== */
-document.addEventListener('DOMContentLoaded',()=>{
-  if(document.getElementById('overallPercent')) renderHomeOverview();
+document.addEventListener('DOMContentLoaded', async () => {
+  if (document.getElementById('overallPercent')) {
+    renderHomeOverview();
+  }
+
+  // Enable notifications by default
+  const notificationToggle = document.getElementById('notificationToggle');
+  if (notificationToggle) {
+    // Request permission and schedule notifications automatically
+    const permission = await requestNotificationPermission();
+    if (permission) {
+      scheduleLocalNotification();
+      notificationToggle.textContent = 'Reminders Enabled';
+      notificationToggle.disabled = true;
+    } else {
+      // If permission was denied, show button to enable later
+      notificationToggle.textContent = 'Enable Reminders';
+      notificationToggle.disabled = false;
+      
+      // Add click handler for later enabling
+      notificationToggle.addEventListener('click', async () => {
+        const permission = await requestNotificationPermission();
+        if (permission) {
+          scheduleLocalNotification();
+          notificationToggle.textContent = 'Reminders Enabled';
+          notificationToggle.disabled = true;
+        }
+      });
+    }
+  }
 });
 
 window.renderHomeOverview = renderHomeOverview;
