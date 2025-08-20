@@ -1,371 +1,307 @@
-/* app.js — rewritten, modern, robust
-   Works with the provided index.html, classes.html, daily.html.
-   Exposes global functions:
-     - renderHomeOverview()
-     - initClassesPage()
-     - initDailyPage()
-*/
+/* app.js — with per-day class records, but only today’s record shown in UI */
 
-/* ======= Storage helpers ======= */
-const STORAGE = {
+/* ========== Init Flags (avoid double init) ========== */
+window.__AttenXInitFlags = window.__AttenXInitFlags || { classes:false, daily:false };
+
+/* ========== Storage Helpers ========== */
+const STORAGE_KEYS = {
   CLASSES: 'attendanceData',
   DAILY: 'dailyAttendance'
 };
 
 function readJSON(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : {};
-  } catch (err) {
-    console.warn('Failed to parse localStorage for', key, err);
-    return {};
-  }
+  try { return JSON.parse(localStorage.getItem(key)) || {}; }
+  catch { return {}; }
 }
-
 function writeJSON(key, obj) {
   localStorage.setItem(key, JSON.stringify(obj));
-  // notify other parts of the app that data changed
   window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { key, data: obj } }));
 }
 
-function readClasses() { return readJSON(STORAGE.CLASSES); }
-function writeClasses(obj) { writeJSON(STORAGE.CLASSES, obj); }
-function readDaily() { return readJSON(STORAGE.DAILY); }
-function writeDaily(obj) { writeJSON(STORAGE.DAILY, obj); }
+function readClasses() { return readJSON(STORAGE_KEYS.CLASSES); }
+function writeClasses(obj) { writeJSON(STORAGE_KEYS.CLASSES, obj); }
+function readDaily() { return readJSON(STORAGE_KEYS.DAILY); }
+function writeDaily(obj) { writeJSON(STORAGE_KEYS.DAILY, obj); }
 
-/* ======= Utility helpers ======= */
-function isoDateFromParts(y, m, d) {
-  return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-}
-function todayISO() {
-  return new Date().toISOString().slice(0,10);
-}
-function clampPct(n){ return Math.max(0, Math.min(100, Math.round(n))); }
-
-function formatShortDate(iso) {
-  try {
-    const dt = new Date(iso);
-    return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  } catch { return iso; }
+function todayISO() { return new Date().toISOString().slice(0,10); }
+function formatDate(iso) {
+  if(!iso) return '';
+  const d = new Date(iso + (iso.length===10 ? 'T00:00:00' : ''));
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
 }
 
-/* tiny debounce */
-function debounce(fn, wait=120){
-  let t = null;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(()=>fn(...args), wait);
-  };
+/* ========== HOME PAGE ========== */
+function computeOverallPercent() {
+  const classes = readClasses();
+  let present=0,total=0;
+  Object.values(classes).forEach(c=>{
+    const recs = Array.isArray(c.records) ? c.records : [];
+    recs.forEach(r=>{
+      total++;
+      if(r.status==='present') present++;
+    });
+  });
+  const pct = total? Math.round((present/total)*100) : 0;
+  return {pct,present,total};
 }
 
-/* ======= HOME: Overall metric ======= */
-/* Exposed globally so inline script in index.html can call it */
 function renderHomeOverview() {
   const el = document.getElementById('overallPercent');
+  if(!el) return;
+  const {pct,present,total} = computeOverallPercent();
+  el.textContent = pct+"%";
+
   const quick = document.getElementById('quickStats');
-  if(!el || !quick) return;
-
-  const classes = readClasses();
-  let present = 0, total = 0;
-  Object.values(classes).forEach(s => {
-    present += Number(s.present || 0);
-    total += Number(s.total || 0);
-  });
-  const pct = total ? Math.round((present/total) * 100) : 0;
-
-  // nice visual: large number and small summary cards
-  el.textContent = pct + '%';
-  el.setAttribute('aria-valuenow', pct);
-
-  const dailyCount = Object.keys(readDaily()).length;
-  quick.innerHTML = `
-    <div class="card quick-card">
-      <div class="muted">Total lectures</div>
-      <div style="font-weight:800;font-size:20px">${total}</div>
-    </div>
-    <div class="card quick-card">
-      <div class="muted">Total present</div>
-      <div style="font-weight:800;font-size:20px">${present}</div>
-    </div>
-    <div class="card quick-card">
-      <div class="muted">Daily marked</div>
-      <div style="font-weight:800;font-size:20px">${dailyCount}</div>
-    </div>
-  `;
+  if(quick){
+    quick.innerHTML = `
+      <div class="card quick-card">
+        <div class="muted">Total lectures</div>
+        <div style="font-weight:800;font-size:20px">${total}</div>
+      </div>
+      <div class="card quick-card">
+        <div class="muted">Total present</div>
+        <div style="font-weight:800;font-size:20px">${present}</div>
+      </div>
+      <div class="card quick-card">
+        <div class="muted">Daily marked</div>
+        <div style="font-weight:800;font-size:20px">${Object.keys(readDaily()).length}</div>
+      </div>
+    `;
+  }
 }
-// debounce so lots of small updates don't thrash UI
-const renderHomeOverviewDebounced = debounce(renderHomeOverview, 80);
+window.addEventListener('dataUpdated', renderHomeOverview);
 
-/* Ensure home updates when storage changes (useful when returning from other pages) */
-window.addEventListener('dataUpdated', renderHomeOverviewDebounced);
+/* ========== CLASSES PAGE ========== */
+function initClassesPage(){
+  if (window.__AttenXInitFlags.classes) { 
+    if (document.getElementById('subjectsList')) renderClasses();
+    return;
+  }
+  window.__AttenXInitFlags.classes = true;
 
-/* ======= CLASSES PAGE ======= */
-/* Exposed globally: initClassesPage() */
-function initClassesPage() {
-  const subjectsList = document.getElementById('subjectsList');
-  const tplRaw = document.getElementById('subjectCardTpl').innerHTML;
+  renderHomeOverview();
+  const list = document.getElementById('subjectsList');
+  const tplRaw = document.getElementById('subjectCardTpl') ? document.getElementById('subjectCardTpl').innerHTML : '';
   const addBtn = document.getElementById('addSubBtn');
   const addInput = document.getElementById('newSubInput');
   const clearBtn = document.getElementById('clearClassesBtn');
   const exportBtn = document.getElementById('exportBtn');
   const importFile = document.getElementById('importFile');
 
-  if(!subjectsList || !tplRaw) return console.warn('classes page elements missing');
-
-  function makeCardElement(name, info) {
-    // create element from template and fill values
-    const wrapper = document.createElement('div');
-    let html = tplRaw.replaceAll('__NAME__', name);
-    wrapper.innerHTML = html.trim();
-    const card = wrapper.firstElementChild;
-    if(!card) return null;
-
-    card.querySelector('.sub-title').textContent = name;
-    card.querySelector('.present-count').textContent = info.present || 0;
-    card.querySelector('.total-count').textContent = info.total || 0;
-    const pct = info.total ? Math.round((info.present/info.total)*100) : 0;
-    const pctEl = card.querySelector('.sub-percent');
-    pctEl.textContent = pct + '%';
-    pctEl.style.color = pct >= 80 ? 'var(--success)' : 'var(--danger)';
-
-    // attach semantic attributes for delegation-based handlers to find
-    card.dataset.subjectName = name;
-    return card;
+  function makeStats(records){
+    const present = records.filter(r=>r.status==='present').length;
+    const total = records.length;
+    const pct = total? Math.round((present/total)*100) : 0;
+    return { present, total, pct };
   }
 
-  function render() {
-    subjectsList.innerHTML = '';
+  function renderClasses(){
+    if(!list) return;
+    list.innerHTML='';
     const data = readClasses();
     const keys = Object.keys(data);
-    if(keys.length === 0){
-      subjectsList.innerHTML = '<div class="muted">No subjects yet. Add one above.</div>';
-      return;
+    if(keys.length===0){
+      list.innerHTML='<div class="muted">No classes yet</div>'; return;
     }
-    // append cards
-    keys.forEach(name => {
-      const card = makeCardElement(name, data[name]);
-      subjectsList.appendChild(card);
+    keys.forEach(name=>{
+      const wrapper=document.createElement('div');
+      wrapper.innerHTML=tplRaw.replaceAll('__NAME__',name).trim();
+      const card=wrapper.firstElementChild;
+      card.dataset.subjectName=name;
+
+      data[name].records = Array.isArray(data[name].records) ? data[name].records : [];
+
+      const { present, total, pct } = makeStats(data[name].records);
+      card.querySelector('.sub-percent').textContent = pct + "%";
+      card.querySelector('.present-count').textContent = present;
+      card.querySelector('.total-count').textContent = total;
+
+      // show only today's record
+      const todayRec = data[name].records.find(r => r.date === todayISO());
+      const hist=document.createElement('div');
+      hist.className='today-record';
+      if(todayRec){
+  hist.classList.add(todayRec.status); // add present/absent class
+  hist.innerHTML = `
+    <div>Today: <strong>${todayRec.status}</strong>
+    <button class="btn small warn" data-del="today">Delete</button></div>
+  `;
+}
+ else {
+        hist.innerHTML = `<div class="muted">No attendance marked today</div>`;
+      }
+      card.appendChild(hist);
+
+      list.appendChild(card);
     });
-    renderHomeOverviewDebounced();
   }
 
-  /* Add subject */
-  addBtn.addEventListener('click', ()=> {
-    const name = (addInput.value || '').trim();
-    if(!name) return alert('Enter a subject name');
-    const data = readClasses();
-    if(data[name]) return alert('Subject already exists');
-    data[name] = { present: 0, total: 0 };
+  window.__renderClassesList = renderClasses;
+
+  if(addBtn) addBtn.addEventListener('click',()=>{
+    const name=(addInput.value||'').trim();
+    if(!name) return alert('Enter subject');
+    const data=readClasses();
+    if(data[name]) return alert('Already exists');
+    data[name]={records:[]};
     writeClasses(data);
-    addInput.value = '';
-    render();
+    if(addInput) addInput.value='';
+    renderClasses();
   });
-  addInput.addEventListener('keydown', e => {
-    if(e.key === 'Enter') addBtn.click();
-  });
+  if(addInput) addInput.addEventListener('keydown',e=>{ if(e.key==='Enter') addBtn && addBtn.click(); });
 
-  /* Event delegation for subject-card buttons */
-  subjectsList.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('button');
-    if(!btn) return;
-    const card = ev.target.closest('.subject-card');
-    if(!card) return;
-    const name = card.dataset.subjectName;
-    if(!name) return;
+  if(list) list.addEventListener('click',ev=>{
+    const btn=ev.target.closest('button'); if(!btn) return;
+    const card=ev.target.closest('.subject-card'); if(!card) return;
+    const name=card.dataset.subjectName;
+    const all=readClasses();
+    if(!all[name]) return;
+    const records = all[name].records;
 
-    const data = readClasses();
-    const subject = data[name] || {present:0,total:0};
+    const tISO = todayISO();
+    const idxToday = records.findIndex(r => r.date === tISO);
 
-    if(btn.classList.contains('inc-present')) {
-      subject.total = Number(subject.total || 0) + 1;
-      subject.present = Number(subject.present || 0) + 1;
-      data[name] = subject; writeClasses(data); render();
-    } else if(btn.classList.contains('inc-absent')) {
-      subject.total = Number(subject.total || 0) + 1;
-      data[name] = subject; writeClasses(data); render();
-    } else if(btn.classList.contains('reset-sub')) {
-      if(confirm(`Reset data for ${name}?`)) {
-        delete data[name]; writeClasses(data); render();
+    if(btn.classList.contains('inc-present')){
+      if(idxToday === -1) records.push({date:tISO,status:'present'});
+      else records[idxToday].status = 'present';
+      writeClasses(all); renderClasses(); renderHomeOverview();
+    } else if(btn.classList.contains('inc-absent')){
+      if(idxToday === -1) records.push({date:tISO,status:'absent'});
+      else records[idxToday].status = 'absent';
+      writeClasses(all); renderClasses(); renderHomeOverview();
+    } else if(btn.dataset.del === "today"){
+      const idxToday = records.findIndex(r => r.date === tISO);
+      if(idxToday !== -1){
+        records.splice(idxToday,1);
+        writeClasses(all); renderClasses(); renderHomeOverview();
+      }
+    } else if(btn.classList.contains('reset-sub')){
+      if(confirm('Delete class?')){
+        delete all[name];
+        writeClasses(all); renderClasses(); renderHomeOverview();
       }
     }
   });
 
-  /* Clear all classes */
-  clearBtn.addEventListener('click', ()=> {
-    if(confirm('Clear all class attendance?')) {
-      localStorage.removeItem(STORAGE.CLASSES);
-      window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { key: STORAGE.CLASSES, data: {} } }));
-      render();
+  if(clearBtn) clearBtn.addEventListener('click',()=>{
+    if(confirm('Clear all classes?')){
+      localStorage.removeItem(STORAGE_KEYS.CLASSES);
+      renderClasses(); renderHomeOverview();
     }
   });
 
-  /* Export classes JSON */
-  exportBtn.addEventListener('click', ()=> {
-    const data = readClasses();
-    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'classes-attendance.json'; a.click();
+  if(exportBtn) exportBtn.addEventListener('click',()=>{
+    const dataStr=JSON.stringify(readClasses(),null,2);
+    const blob=new Blob([dataStr],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='classes.json';a.click();
     URL.revokeObjectURL(url);
   });
 
-  /* Import classes JSON (safe validation) */
-  importFile.addEventListener('change', (e) => {
-    const f = e.target.files[0]; if(!f) return;
-    const fr = new FileReader();
-    fr.onload = () => {
+  if(importFile) importFile.addEventListener('change',ev=>{
+    const file=ev.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=e=>{
       try {
-        const obj = JSON.parse(fr.result);
-        // validate shape: object of subjects -> {present:number, total:number}
-        const ok = typeof obj === 'object' && obj !== null && Object.keys(obj).every(k => {
-          const v = obj[k];
-          return typeof v === 'object' && v !== null &&
-            (Number.isFinite(v.present) || typeof v.present === 'number') &&
-            (Number.isFinite(v.total) || typeof v.total === 'number');
+        const obj=JSON.parse(e.target.result);
+        Object.keys(obj||{}).forEach(k=>{
+          if(!Array.isArray(obj[k].records)) obj[k].records = [];
         });
-        if(!ok) throw new Error('Invalid format');
-        writeClasses(obj);
-        alert('Imported classes successfully');
-        render();
-      } catch (err) {
-        console.error(err);
-        alert('Import failed — invalid JSON format for classes');
-      }
+        writeClasses(obj); renderClasses(); renderHomeOverview();
+      } catch(err){ alert('Invalid JSON'); }
     };
-    fr.readAsText(f);
-    // reset input so re-importing same file is allowed later
-    importFile.value = '';
+    reader.readAsText(file);
+    importFile.value='';
   });
 
-  // re-render if other pages change data
-  window.addEventListener('dataUpdated', (e)=> {
-    if(e.detail && e.detail.key === STORAGE.CLASSES) render();
-  });
-
-  render();
+  renderClasses();
 }
 
-/* ======= DAILY PAGE (Calendar) ======= */
-/* Exposed globally: initDailyPage() */
-function initDailyPage() {
-  const calendarEl = document.getElementById('calendar');
-  const monthYearEl = document.getElementById('monthYear');
-  const prevBtn = document.getElementById('prevMonth');
-  const nextBtn = document.getElementById('nextMonth');
-  const clearDailyBtn = document.getElementById('clearDailyBtn');
+/* ========== DAILY PAGE (unchanged) ========== */
+let currentMonth=new Date().getMonth();
+let currentYear=new Date().getFullYear();
+
+function initDailyPage(){
+  if (window.__AttenXInitFlags.daily) {
+    renderCalendar(currentMonth,currentYear);
+    return;
+  }
+  window.__AttenXInitFlags.daily = true;
+
+  function renderCalendar(month,year){
+    const cal=document.getElementById('calendar');
+    const monthYear=document.getElementById('monthYear');
+    if(!cal||!monthYear) return;
+    cal.innerHTML='';
+    const firstDay=(new Date(year,month)).getDay();
+    const daysInMonth=32-new Date(year,month,32).getDate();
+    monthYear.textContent=new Date(year,month).toLocaleDateString(undefined,{month:'long',year:'numeric'});
+    const daily=readDaily();
+
+    for(let i=0;i<firstDay;i++){
+      const cell=document.createElement('div');
+      cell.className='cell empty-cell';
+      cal.appendChild(cell);
+    }
+    for(let d=1;d<=daysInMonth;d++){
+      const date=new Date(year,month,d);
+      const iso=date.toISOString().slice(0,10);
+      const cell=document.createElement('div');
+      cell.className='cell';
+      cell.innerHTML=`<div class="daynum">${d}</div>`;
+      if(daily[iso]==='present'){
+        const dot=document.createElement('div');dot.className='dot present-dot';cell.appendChild(dot);
+      } else if(daily[iso]==='absent'){
+        const dot=document.createElement('div');dot.className='dot absent-dot';cell.appendChild(dot);
+      }
+      cell.addEventListener('click',()=>{
+        const daily=readDaily();
+        if(daily[iso]==='present'){ daily[iso]='absent'; }
+        else if(daily[iso]==='absent'){ delete daily[iso]; }
+        else { daily[iso]='present'; }
+        writeDaily(daily); renderCalendar(currentMonth,currentYear);
+      });
+      cal.appendChild(cell);
+    }
+  }
+
+  window.__renderCalendar = renderCalendar;
+
+  const prev = document.getElementById('prevMonth');
+  const next = document.getElementById('nextMonth');
+  const clearBtn = document.getElementById('clearDailyBtn');
   const markTodayPresent = document.getElementById('markTodayPresent');
   const markTodayAbsent = document.getElementById('markTodayAbsent');
 
-  if(!calendarEl || !monthYearEl) return console.warn('daily page elements missing');
-
-  let daily = readDaily();
-  let view = new Date(); // view month/year
-  let viewMonth = view.getMonth();
-  let viewYear = view.getFullYear();
-
-  // update local copy when storage updates elsewhere
-  window.addEventListener('dataUpdated', (e)=>{
-    if(e.detail && e.detail.key === STORAGE.DAILY) {
-      daily = readDaily();
-      renderCalendar();
+  if(prev) prev.addEventListener('click',()=>{
+    currentMonth--; if(currentMonth<0){currentMonth=11;currentYear--;}
+    renderCalendar(currentMonth,currentYear);
+  });
+  if(next) next.addEventListener('click',()=>{
+    currentMonth++; if(currentMonth>11){currentMonth=0;currentYear++;}
+    renderCalendar(currentMonth,currentYear);
+  });
+  if(clearBtn) clearBtn.addEventListener('click',()=>{
+    if(confirm('Clear daily records?')){
+      localStorage.removeItem(STORAGE_KEYS.DAILY);
+      renderCalendar(currentMonth,currentYear);
     }
   });
-
-  function renderCalendar() {
-    calendarEl.innerHTML = '';
-    monthYearEl.textContent = new Date(viewYear, viewMonth).toLocaleString(undefined, { month: 'long', year: 'numeric' });
-
-    const firstDay = new Date(viewYear, viewMonth, 1).getDay();
-    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-
-    // leading empty cells
-    for(let i = 0; i < firstDay; i++) {
-      const empty = document.createElement('div');
-      empty.className = 'cell empty-cell';
-      calendarEl.appendChild(empty);
-    }
-
-    for(let d=1; d<=daysInMonth; d++) {
-      const iso = isoDateFromParts(viewYear, viewMonth+1, d);
-      const status = daily[iso] || null; // 'Present' | 'Absent' | null
-
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      cell.tabIndex = 0; // keyboard focusable
-      cell.setAttribute('role', 'button');
-      cell.setAttribute('aria-pressed', status ? 'true' : 'false');
-      cell.setAttribute('aria-label', `Day ${d} ${status ? status : 'no record'}`);
-
-      const daynum = document.createElement('div');
-      daynum.className = 'daynum';
-      daynum.textContent = d;
-      cell.appendChild(daynum);
-
-      if(status === 'Present') {
-        const dot = document.createElement('div'); dot.className = 'dot present-dot'; dot.setAttribute('title','Present'); cell.appendChild(dot);
-      } else if(status === 'Absent') {
-        const dot = document.createElement('div'); dot.className = 'dot absent-dot'; dot.setAttribute('title','Absent'); cell.appendChild(dot);
-      }
-
-      // Toggle handler (cycle: none -> Present -> Absent -> none)
-      function toggle() {
-        if(!daily[iso]) daily[iso] = 'Present';
-        else if(daily[iso] === 'Present') daily[iso] = 'Absent';
-        else delete daily[iso];
-        writeDaily(daily);
-        // re-render this month
-        renderCalendar();
-        renderHomeOverviewDebounced();
-      }
-
-      cell.addEventListener('click', toggle);
-      cell.addEventListener('keydown', (ev) => {
-        if(ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
-      });
-
-      calendarEl.appendChild(cell);
-    }
-  }
-
-  prevBtn.addEventListener('click', ()=> {
-    viewMonth--; if(viewMonth < 0) { viewMonth = 11; viewYear--; }
-    renderCalendar();
+  if(markTodayPresent) markTodayPresent.addEventListener('click',()=>{
+    const d=readDaily(); d[todayISO()]='present'; writeDaily(d); renderCalendar(currentMonth,currentYear);
   });
-
-  nextBtn.addEventListener('click', ()=> {
-    viewMonth++; if(viewMonth > 11) { viewMonth = 0; viewYear++; }
-    renderCalendar();
+  if(markTodayAbsent) markTodayAbsent.addEventListener('click',()=>{
+    const d=readDaily(); d[todayISO()]='absent'; writeDaily(d); renderCalendar(currentMonth,currentYear);
   });
-
-  clearDailyBtn.addEventListener('click', ()=> {
-    if(confirm('Clear all daily records?')) {
-      localStorage.removeItem(STORAGE.DAILY);
-      daily = {};
-      window.dispatchEvent(new CustomEvent('dataUpdated', { detail: { key: STORAGE.DAILY, data: {} } }));
-      renderCalendar();
-      renderHomeOverviewDebounced();
-    }
-  });
-
-  markTodayPresent.addEventListener('click', ()=> {
-    const iso = todayISO(); daily[iso] = 'Present'; writeDaily(daily); renderCalendar(); renderHomeOverviewDebounced();
-  });
-  markTodayAbsent.addEventListener('click', ()=> {
-    const iso = todayISO(); daily[iso] = 'Absent'; writeDaily(daily); renderCalendar(); renderHomeOverviewDebounced();
-  });
-
-  // initial render
-  renderCalendar();
+  renderCalendar(currentMonth,currentYear);
 }
 
-/* ======= Auto-refresh on DOMContentLoaded for the home metric ======= */
-document.addEventListener('DOMContentLoaded', () => {
-  // If the page contains the overview, render it initially.
-  if(document.getElementById('overallPercent')) {
-    renderHomeOverview();
-  }
+/* ========== Bootstrapping ========== */
+document.addEventListener('DOMContentLoaded',()=>{
+  if(document.getElementById('overallPercent')) renderHomeOverview();
 });
 
-// Expose core functions globally so inline scripts in HTML can call them
 window.renderHomeOverview = renderHomeOverview;
 window.initClassesPage = initClassesPage;
 window.initDailyPage = initDailyPage;
